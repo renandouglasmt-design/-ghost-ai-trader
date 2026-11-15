@@ -53,6 +53,7 @@ if (process.argv.includes('--self-test')) {
 } else {
   await mkdir('data',{recursive:true});
   const old=await read('data/report.json',{state:start(),candles:[]});
+  const previous=JSON.stringify({...old,updated:undefined});
   const state=old.state;
   let candles=old.candles, market='ligado', serverTime=0;
   try {
@@ -68,5 +69,8 @@ if (process.argv.includes('--self-test')) {
   }
   const account=await verifyAccount(serverTime);
   console.log('Mercado Spot Testnet: '+market+' | autenticação: '+account);
-  await writeFile('data/report.json',JSON.stringify({symbol:SYMBOL,updated:new Date().toISOString(),market,account,candles,state})+'\n');
+  const report={symbol:SYMBOL,market,account,candles,state};
+  if (JSON.stringify(report)!==previous) {
+    await writeFile('data/report.json',JSON.stringify({...report,updated:new Date().toISOString()})+'\n');
+  }
 }
