@@ -29,6 +29,52 @@ jobs:
           node-version: '24'
       - name: Testar o motor e os dois modos de simulação
         run: node runner.mjs --self-test
+      - name: Diagnosticar ligação WebSocket oficial
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          node --input-type=module <<'NODE'
+          import { randomBytes } from 'node:crypto';
+          import { request } from 'node:https';
+          const host = 'ws-api.testnet.binance.vision';
+          const path = '/ws-api/v3';
+
+          function handshake(port) {
+            return new Promise(resolve => {
+              const req = request({hostname:host,port,path,headers:{
+                Connection:'Upgrade', Upgrade:'websocket',
+                'Sec-WebSocket-Version':'13',
+                'Sec-WebSocket-Key':randomBytes(16).toString('base64'),
+              }});
+              const timer=setTimeout(()=>req.destroy(new Error('Timeout')),8000);
+              const finish=value=>{clearTimeout(timer);resolve(value);};
+              req.once('upgrade',(res,socket)=>{socket.destroy();finish(res.statusCode);});
+              req.once('response',res=>{res.resume();finish(res.statusCode);});
+              req.once('error',err=>finish(err.code||err.message));
+              req.end();
+            });
+          }
+
+          function checkTime(port) {
+            return new Promise(resolve=>{
+              const socket=new WebSocket('wss://'+host+':'+port+path);
+              const finish=result=>{clearTimeout(timer);socket.close();resolve(result);};
+              const timer=setTimeout(()=>finish(false),8000);
+              socket.addEventListener('open',()=>socket.send(JSON.stringify({id:'testnet-time',method:'time'})),{once:true});
+              socket.addEventListener('message',event=>{
+                let reply;
+                try {reply=JSON.parse(event.data);} catch {finish(false);return;}
+                finish(reply.id==='testnet-time' && reply.status===200 && Number.isSafeInteger(reply.result?.serverTime));
+              },{once:true});
+              socket.addEventListener('error',()=>finish(false),{once:true});
+            });
+          }
+
+          for(const port of [443,9443]) {
+            const result=await handshake(port);
+            console.log(host+':'+port+' — '+(typeof result==='number'?'HTTP ':'')+result);
+            if(result===101)console.log('Hora oficial da Spot Testnet: '+(await checkTime(port)?'confirmada':'sem resposta válida'));
+          }
+          NODE
       - name: Consultar a Spot Testnet e simular operações
         env:
           BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
