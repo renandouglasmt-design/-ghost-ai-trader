@@ -3,8 +3,9 @@ import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import {analyze, replay, start, step, SYMBOL} from './engine.mjs';
 
-const host='https://testnet.binance.vision';
-async function get(path, query={}, headers={}) {
+const hosts=['https://testnet.binance.vision','https://api1.testnet.binance.vision'];
+async function get(host,path,query={},headers={}) {
+  if (!hosts.includes(host)) throw Error('Endereço fora da Spot Testnet');
   const url=new URL(path,host);
   url.search=new URLSearchParams(query);
   const response=await fetch(url,{headers,redirect:'error',signal:AbortSignal.timeout(18000)});
@@ -12,14 +13,15 @@ async function get(path, query={}, headers={}) {
   return response.json();
 }
 
-async function verifyAccount(serverTime) {
+async function verifyAccount(connection) {
   const {BINANCE_API_KEY:key,BINANCE_API_SECRET:secret}=process.env;
   if (!key || !secret) return 'sem chaves';
-  if (!serverTime) return 'indisponível';
-  const params={timestamp:serverTime,recvWindow:10000};
+  if (!connection) return 'indisponível';
+  const {host,clockOffset}=connection;
+  const params={timestamp:Date.now()+clockOffset,recvWindow:10000};
   params.signature=createHmac('sha256',secret).update(new URLSearchParams(params).toString()).digest('hex');
   try {
-    const account=await get('/api/v3/account',params,{'X-MBX-APIKEY':key});
+    const account=await get(host,'/api/v3/account',params,{'X-MBX-APIKEY':key});
     return account.accountType==='SPOT' && Array.isArray(account.balances) ? 'ligada' : 'resposta inesperada';
   } catch (error) {
     return error.message==='HTTP 451' ? 'restrição regional (HTTP 451)' : 'falha na validação';
@@ -55,19 +57,35 @@ if (process.argv.includes('--self-test')) {
   const old=await read('data/report.json',{state:start(),candles:[]});
   const previous=JSON.stringify({...old,updated:undefined});
   const state=old.state;
-  let candles=old.candles, market='ligado', serverTime=0;
-  try {
-    const [time,rows]=await Promise.all([get('/api/v3/time'),get('/api/v3/klines',{symbol:SYMBOL,interval:'5m',limit:500})]);
-    serverTime=time.serverTime;
-    const fresh=rows.filter(row=>row[6]<serverTime).map(row=>({id:Number(row[6]),close:Number(row[4]),volume:Number(row[5])}));
-    if (fresh.length<130 || fresh.some((c,i)=>!Number.isSafeInteger(c.id) || !Number.isFinite(c.close) || c.close<=0 || !Number.isFinite(c.volume) || c.volume<0 || (i && c.id<=fresh[i-1].id))) throw Error('Dados insuficientes');
-    candles=fresh;
+  let candles=old.candles, market='indisponível', connection;
+  const failures=[];
+  for (const host of hosts) {
+    try {
+      const [time,rows]=await Promise.all([
+        get(host,'/api/v3/time').then(value=>({...value,receivedAt:Date.now()})),
+        get(host,'/api/v3/klines',{symbol:SYMBOL,interval:'5m',limit:500}),
+      ]);
+      if (!Number.isSafeInteger(time.serverTime) || time.serverTime<=0 || !Array.isArray(rows)) throw Error('Resposta inválida');
+      const fresh=rows.filter(row=>row[6]<time.serverTime).map(row=>({id:Number(row[6]),close:Number(row[4]),volume:Number(row[5])}));
+      if (fresh.length<130 || fresh.some((c,i)=>!Number.isSafeInteger(c.id) || !Number.isFinite(c.close) || c.close<=0 || !Number.isFinite(c.volume) || c.volume<0 || (i && c.id<=fresh[i-1].id))) throw Error('Dados insuficientes');
+      candles=fresh;
+      connection={host,clockOffset:time.serverTime-time.receivedAt};
+      market='ligado';
+      console.log(new URL(host).hostname+': dados confirmados');
+      break;
+    } catch (error) {
+      const reason=/^HTTP [0-9]{3}$/.test(error.message)?error.message:error.name==='TimeoutError'?'tempo esgotado':error.cause?.code==='ENOTFOUND'?'DNS indisponível':'resposta indisponível';
+      failures.push(reason);
+      console.log(new URL(host).hostname+': '+reason);
+    }
+  }
+  if (connection) {
     if (!state.last) step(state,candles.slice(-30));
     else replay(candles,state,Infinity);
-  } catch (error) {
-    market=error.message==='HTTP 451' ? 'restrição regional (HTTP 451)' : 'indisponível';
+  } else if(failures.includes('HTTP 451')) {
+    market='restrição regional (HTTP 451)';
   }
-  const account=await verifyAccount(serverTime);
+  const account=await verifyAccount(connection);
   console.log('Mercado Spot Testnet: '+market+' | autenticação: '+account);
   const report={symbol:SYMBOL,market,account,candles,state};
   if (JSON.stringify(report)!==previous) {
