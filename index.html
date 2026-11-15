@@ -40,10 +40,10 @@ function activate(samples,label,storage){
 function training(){
   const candles=Array.from({length:500},(_,i)=>{
     const k=i%100;
-    const close=k<30?100+0.15*k:k<49?105+0.7*(k-30):k<71?118-0.65*(k-49):k<81?104+0.95*(k-71):115-0.78*(k-81);
-    return {id:Date.UTC(2026,0,1)+i*300000,close,volume:[29,64,66,68,70,77,80].includes(k)?260:100};
+    const close=k<30?100+0.15*k:k<49?105+0.7*(k-30):k<71?118-0.65*(k-49):k<87?104+1.25*(k-71):98+0.1*(k-87);
+    return {id:Date.UTC(2026,0,1)+i*300000,close,volume:[29,64,66,68,70,85].includes(k)?260:100};
   });
-  activate(candles,'Treino com dados sintéticos','ghost-treino-v1');
+  activate(candles,'Treino com dados sintéticos','ghost-treino-v2');
 }
 const el=(tag,txt,style)=>{const e=document.createElement(tag);if(txt)e.textContent=txt;if(style)e.className=style;return e;};
 function tile(label,value,style='stat'){const card=el('div','',style);card.append(el('small',label),el('strong',value));return card;}
@@ -60,13 +60,13 @@ function render(target,s){
   if(s.latest)for(const [name,label] of Object.entries(fields))votes.append(tile(label,word[s.latest.votes[name]],''));
   const signal=s.latest?.signal;
   const caption=signal&&signal!=='WAIT'?'Consenso 4/4 · '+word[signal]:signal?'Sem consenso 4/4 de compra ou venda':'Quatro análises à espera da primeira vela';
-  target.replaceChildren(grid,el('p',caption,'accent'),votes,el('p','Histórico · '+s.closed+' operações fechadas','hint'),history);
+  target.replaceChildren(grid,el('p',caption,'accent'),votes,el('p','Histórico · '+s.closed+(s.closed===1?' operação fechada':' operações fechadas'),'hint'),history);
 }
 function simulate(count){
   const processed=replay(candles,state,count);
   let saved=true;
   try {localStorage.setItem(key,JSON.stringify(state));}catch{saved=false;}
-  byId('progress').textContent=source+' · '+(processed?processed+' velas processadas.':'Todas as velas recebidas já foram processadas.')+(saved?'':' O navegador bloqueou a gravação do histórico.');
+  byId('progress').textContent=source+' · '+(processed?processed+(processed===1?' vela processada.':' velas processadas.'):'Todas as velas recebidas já foram processadas.')+(saved?'':' O navegador bloqueou a gravação do histórico.');
   render(byId('manual'),state);
 }
 byId('one').onclick=()=>simulate(1);byId('many').onclick=()=>simulate(100);
