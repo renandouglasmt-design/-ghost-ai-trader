@@ -15,7 +15,7 @@
 <header><p class="eyebrow">Binance Spot Testnet · BTC/USDT · 5 min</p><h1>GHOST AI Trader</h1><p class="stamp" id="connection" role="status">A carregar o estado da Testnet…</p></header>
 <section class="panel" aria-labelledby="replay-title">
 <h2 id="replay-title">Simulação no Samsung</h2>
-<p class="hint">Cada passo processa uma vela histórica fechada. O histórico desta simulação fica neste navegador.</p>
+<p class="hint">Cada passo processa uma vela de 5 minutos. O histórico desta simulação fica neste navegador.</p>
 <div class="buttons"><button id="one" class="primary" disabled>Simular 1</button><button id="many" disabled>Simular 100</button></div>
 <p id="progress" class="hint" role="status">A carregar velas da Spot Testnet…</p>
 <div id="manual"></div>
@@ -29,9 +29,22 @@ const money=new Intl.NumberFormat('pt-PT',{minimumFractionDigits:2,maximumFracti
 const when=new Intl.DateTimeFormat('pt-PT',{dateStyle:'short',timeStyle:'short',timeZone:'Europe/Lisbon'});
 const word={BUY:'Compra',SELL:'Venda',WAIT:'Aguardar'};
 const fields={trend:'Tendência',momentum:'Força (RSI)',breakout:'Rompimento',volume:'Volume'};
-const key='ghost-spot-testnet-v1';
-let state=start(), candles=[];
-try { state=JSON.parse(localStorage.getItem(key))||state; } catch {}
+let key='', state=start(), candles=[], source='';
+function activate(samples,label,storage){
+  candles=samples;source=label;key=storage;state=start();
+  try {state=JSON.parse(localStorage.getItem(key))||state;} catch {}
+  byId('one').disabled=byId('many').disabled=false;
+  byId('progress').textContent=source+' · '+candles.length+' velas no conjunto.';
+  render(byId('manual'),state);
+}
+function training(){
+  const candles=Array.from({length:500},(_,i)=>{
+    const k=i%100;
+    const close=k<30?100+0.15*k:k<49?105+0.7*(k-30):k<71?118-0.65*(k-49):k<81?104+0.95*(k-71):115-0.78*(k-81);
+    return {id:Date.UTC(2026,0,1)+i*300000,close,volume:[29,64,66,68,70,77,80].includes(k)?260:100};
+  });
+  activate(candles,'Treino com dados sintéticos','ghost-treino-v1');
+}
 const el=(tag,txt,style)=>{const e=document.createElement(tag);if(txt)e.textContent=txt;if(style)e.className=style;return e;};
 function tile(label,value,style='stat'){const card=el('div','',style);card.append(el('small',label),el('strong',value));return card;}
 function render(target,s){
@@ -53,7 +66,7 @@ function simulate(count){
   const processed=replay(candles,state,count);
   let saved=true;
   try {localStorage.setItem(key,JSON.stringify(state));}catch{saved=false;}
-  byId('progress').textContent=(processed?processed+' velas processadas.':'Todas as velas recebidas já foram processadas.')+(saved?'':' O navegador bloqueou a gravação do histórico.');
+  byId('progress').textContent=source+' · '+(processed?processed+' velas processadas.':'Todas as velas recebidas já foram processadas.')+(saved?'':' O navegador bloqueou a gravação do histórico.');
   render(byId('manual'),state);
 }
 byId('one').onclick=()=>simulate(1);byId('many').onclick=()=>simulate(100);
@@ -62,15 +75,13 @@ try{
   const response=await fetch('./data/report.json',{cache:'no-store'});
   if(!response.ok)throw Error();
   const report=await response.json();
-  candles=report.candles;
   byId('connection').textContent='Mercado '+report.market+' · Conta demo '+report.account+' · '+when.format(new Date(report.updated));
-  const ready=candles.length>=WARMUP;
-  byId('one').disabled=byId('many').disabled=!ready;
-  byId('progress').textContent=ready?candles.length+' velas disponíveis.':'À espera de dados da Spot Testnet.';
+  if(report.candles.length>=WARMUP) activate(report.candles,'Velas da Spot Testnet','ghost-spot-testnet-v1');
+  else training();
   render(byId('auto'),report.state);
 }catch{
   byId('connection').textContent='À espera do primeiro relatório automático.';
-  byId('progress').textContent='Os botões ficam disponíveis assim que houver velas da Spot Testnet.';
+  training();
 }
 </script>
 </body>
