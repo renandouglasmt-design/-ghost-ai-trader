@@ -1,0 +1,65 @@
+name: GHOST AI Trader · Spot Testnet e Pages
+on:
+  push:
+    branches: [main]
+    paths: [index.html, engine.mjs, runner.mjs, .github/workflows/ghost-trader.yml]
+  workflow_dispatch:
+  schedule:
+    - cron: '7,22,37,52 * * * *'
+permissions:
+  contents: read
+concurrency:
+  group: ghost-trader-main
+  cancel-in-progress: false
+jobs:
+  simulate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Testar o motor e os dois modos de simulação
+        run: node runner.mjs --self-test
+      - name: Consultar a Spot Testnet e simular operações
+        env:
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+        run: node runner.mjs
+      - name: Guardar o histórico fictício
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/report.json
+          if ! git diff --cached --quiet; then
+            git commit -m 'Registar simulação Spot Testnet'
+            git push origin HEAD:main
+          fi
+      - name: Preparar o painel público
+        run: |
+          install -d _site/data
+          cp index.html engine.mjs _site/
+          cp data/report.json _site/data/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+  publish:
+    needs: simulate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar no GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
